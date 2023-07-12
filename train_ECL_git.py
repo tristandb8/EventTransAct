@@ -51,7 +51,7 @@ def main(params):
     shutil.copyfile('/home/tr248228/RP_EvT/October/n-epic-kitchens/dl_ft_1_train_O.py', save_model + '/dl_ft_1_train_O.py')
     shutil.copyfile('/home/tr248228/RP_EvT/October/n-epic-kitchens/dl_ft_1_test_O.py', save_model + '/dl_ft_1_test_O.py')
   else:
-    shutil.copyfile('snntorch/snntorch/spikevision/spikedata/dvs_gesture224.py', save_model + '/dvs_gesture224.py')
+    shutil.copyfile('snntorch/snntorch/spikevision/spikedata/dvs_gesture.py', save_model + '/dvs_gesture.py')
   shutil.copyfile('config.py', save_model + '/config.py')
 
 
@@ -65,7 +65,7 @@ def main(params):
 
   elif params.dataset == 'DVS':
     sys.path.append('snntorch/snntorch')
-    from spikevision.spikedata.dvs_gesture224 import DVSGesture
+    from spikevision.spikedata.dvs_gesture import DVSGesture
     
     train_dataset = DVSGesture("/home/tr248228/RP_EvT/October/videoMae/DVS/download", train=True, dt = int(500000/params.num_steps), num_steps=params.num_steps,
                            eventDrop = params.eventDrop, eventAugs = params.evAugs, skip_rate = params.skip_rate, final_frames=params.final_frames,
