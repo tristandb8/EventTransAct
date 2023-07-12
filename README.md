@@ -1,4 +1,5 @@
 # EventTransAct
+![Example Image](images/Model.PNG)
 
 ## Downloading dataset
 You can find instructions on downloading the 2 datasets used in the paper below
