@@ -196,11 +196,6 @@ def main(params):
       per_frame_logits, twoDrep1 = model([inputs, frameids1])
       _, twoDrep2 = model([inputs1, frameids1])
 
-      print('----------------------------------')
-      print(twoDrep1.shape, twoDrep2.shape)
-      print('----------------------------------')
-
-
       ce_loss = criterion(per_frame_logits,labels.long())
       con_loss = 0
       for ii in range(0, twoDrep1.shape[0], inputs.shape[2]):
