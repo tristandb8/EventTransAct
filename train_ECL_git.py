@@ -1,7 +1,4 @@
-#from __future__ import print_function
 import torch
-#from ek_dataloader_adeel import ss_dataset_gen1, collate_fn2
-
 
 from datetime import datetime
 import sys
@@ -20,14 +17,10 @@ from argparse import Namespace
 import shutil
 from nt_xent_original import *
 
-sys.path.append('/home/tr248228/RP_EvT/October/n-epic-kitchens')
-from functions_NEK_VTN import getInputs, startLog, validateDVS
-
 import argparse
 sys.path.insert(0, './vtn/')
 from parser_sf import parse_args, load_config
-from vtn_ECL import VTN
-import config as params
+
 
 def main(params):
   torch.cuda.empty_cache()
@@ -47,17 +40,10 @@ def main(params):
     os.makedirs(save_model)
   
   logFile = open(save_model + 'logfile.txt', 'a')
-  if params.dataset == 'DVS':
-    shutil.copyfile('/home/tr248228/RP_EvT/October/n-epic-kitchens/dl_ft_1_train_O.py', save_model + '/dl_ft_1_train_O.py')
-    shutil.copyfile('/home/tr248228/RP_EvT/October/n-epic-kitchens/dl_ft_1_test_O.py', save_model + '/dl_ft_1_test_O.py')
-  else:
-    shutil.copyfile('snntorch/snntorch/spikevision/spikedata/dvs_gesture.py', save_model + '/dvs_gesture.py')
-  shutil.copyfile('config.py', save_model + '/config.py')
-
 
   if params.dataset == 'NEK':
-    from dl_ft_1_train_O_ECL import ek_train, collate_fn2
-    from dl_ft_1_test_O_ECL import ek_test, collate_fn_test
+    from DL.dl_ft_1_train_O_ECL import ek_train, collate_fn2
+    from DL.dl_ft_1_test_O_ECL import ek_test, collate_fn_test
 
     train_dataset = ek_train(shuffle = True, trainKitchen = 'p01', eventDrop = params.eventDrop, eventAugs = params.evAugs, numClips = params.numClips)
     train_dataloader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=4,
@@ -76,6 +62,10 @@ def main(params):
   print(f'Train dataset length: {len(train_dataset)}')
   logFile.write(f'Train dataset length: {len(train_dataset)}\n')
 
+  if params.ECL:
+    from vtn_ECL import VTN
+  else:
+    from vtn import VTN
 
   args = Namespace(cfg_file='configs/Kinetics/SLOWFAST_4x16_R50.yaml', init_method='tcp://localhost:9999', num_shards=1, opts=[], shard_id=0)
 
@@ -163,7 +153,9 @@ def main(params):
     criterion= torch.nn.CrossEntropyLoss().cuda()
   model.train()
   criterion_intra = NTXentLoss(device = 'cuda', batch_size=params.num_segments, temperature=0.1, use_cosine_similarity = False)
-  acc =bestacc =0
+  acc = 0
+  bestacc = 0
+
   for epoch in range(params.num_epochs):
     losses, ce_losses, con_losses = [], [], []
     intra_csl2d_logits_predictions = []
@@ -174,42 +166,48 @@ def main(params):
         print(f"Learning rate is: {param_group['lr']}")
         logFile.write(f"Learning rate is: {param_group['lr']}\n")
     for i, data in enumerate(train_dataloader, 0):
-      inputs, inputs1, labels, pathBS = data
-
+      if params.ECL:
+        inputs, inputs1, labels, pathBS = data
+      else:
+        inputs, labels, pathBS = data
       if (i == 0) & (epoch == 0):
         print("inputs.shape", inputs.shape, flush = True)
         logFile.write(f"inputs.shape {inputs.shape} \n")
-      frameids = torch.arange(0, inputs.shape[1],1)
       optimizer.zero_grad()
 
       inputs = inputs.permute(0,2,1,3,4) #aug_DL output is [120, 16, 3, 112, 112]], #model expects [8, 3, 16, 112, 112]
-      inputs1 = inputs1.permute(0,2,1,3,4)
-      
-      # wrap them in Variable
       inputs = Variable(inputs.cuda())
-      inputs1 = Variable(inputs1.cuda())
+      if params.ECL:
+        inputs1 = inputs1.permute(0,2,1,3,4)
+        inputs1 = Variable(inputs1.cuda())
       labels = torch.as_tensor(labels)
       labels = Variable(labels.cuda())
 
       frameids1= torch.arange(0, inputs.shape[2],1).to(torch.int).repeat(inputs.shape[0], 1).cuda()
       
-      per_frame_logits, twoDrep1 = model([inputs, frameids1])
-      _, twoDrep2 = model([inputs1, frameids1])
+      if params.ECL:
+        per_frame_logits, twoDrep1 = model([inputs, frameids1])
+        _, twoDrep2 = model([inputs1, frameids1])
+      else:
+        per_frame_logits = model([inputs, frameids1])
+
 
       ce_loss = criterion(per_frame_logits,labels.long())
-      con_loss = 0
-      for ii in range(0, twoDrep1.shape[0], inputs.shape[2]):
-        temp1, temp2 = criterion_intra(twoDrep1[ii:ii+inputs.shape[2]:params.num_segments,:], twoDrep2[ii:ii+inputs.shape[2]:params.num_segments,:])
-
-        intra_csl2d_logits_predictions.extend(torch.max(temp2, axis=1).indices.cpu().numpy())
-
-        con_loss += temp1
-      con_loss/= (twoDrep1.shape[0]/params.final_frames)
-
       ce_losses.append(ce_loss.cpu().detach().numpy())
-      con_losses.append(con_loss.cpu().detach().numpy())
 
-      loss = ce_loss * params.ECL_weight + con_loss
+      if params.ECL:
+        con_loss = 0
+        for ii in range(0, twoDrep1.shape[0], inputs.shape[2]):
+          temp1, temp2 = criterion_intra(twoDrep1[ii:ii+inputs.shape[2]:params.num_segments,:], twoDrep2[ii:ii+inputs.shape[2]:params.num_segments,:])
+
+          intra_csl2d_logits_predictions.extend(torch.max(temp2, axis=1).indices.cpu().numpy())
+
+          con_loss += temp1
+        con_loss/= (twoDrep1.shape[0]/params.final_frames)
+        con_losses.append(con_loss.cpu().detach().numpy())
+        loss = ce_loss * params.ECL_weight + con_loss
+      else:
+        loss = ce_loss
       losses.append(loss.cpu().detach().numpy())
       loss.backward()
       optimizer.step()
@@ -224,24 +222,28 @@ def main(params):
         logFile.write("optimizer\n" + str(optimizer) + "\n")
 
     signal = "===============================================\n"
-    eoe = "End of epoch " + str(epoch)+  ", ECL : " + str(np.mean(con_losses)) + ", mean loss: " + str(np.mean(losses)) + "\n"
+    if params.ECL:
+      eoe = "End of epoch " + str(epoch)+  ", ECL : " + str(np.mean(con_losses)) + ", mean loss: " + str(np.mean(losses)) + "\n"
+    else:
+      eoe = "End of epoch " + str(epoch) + ", mean loss: " + str(np.mean(losses)) + "\n"
     print(signal + eoe + signal)
     logFile.write(signal + eoe + signal)
 
-    intra_csl2d_logits_predictions =  np.asarray(intra_csl2d_logits_predictions)
-    intracontrastive2d_acc = ((intra_csl2d_logits_predictions == 0).sum())/len(intra_csl2d_logits_predictions)     
-    print(f'intra-2D Contrastive Accuracy at Epoch {epoch} is {intracontrastive2d_acc*100 :0.3f}')
-    logFile.write(f'intra-2D Contrastive Accuracy at Epoch {epoch} is {intracontrastive2d_acc*100 :0.3f}\n')
+    if params.ECL:
+      intra_csl2d_logits_predictions =  np.asarray(intra_csl2d_logits_predictions)
+      intracontrastive2d_acc = ((intra_csl2d_logits_predictions == 0).sum())/len(intra_csl2d_logits_predictions)     
+      print(f'intra-2D Contrastive Accuracy at Epoch {epoch} is {intracontrastive2d_acc*100 :0.3f}')
+      logFile.write(f'intra-2D Contrastive Accuracy at Epoch {epoch} is {intracontrastive2d_acc*100 :0.3f}\n')
     logFile.flush()
 
     if(epoch%4==0) or (epoch + 10 > params.num_epochs):
       if (params.dataset == "NEK"):
         acc = validate(model, epoch, logFile, ek_test, collate_fn_test, params.testkit, isTest = True)
         if (epoch%20==0):
-          acc = validate(model, epoch, logFile, ek_test, collate_fn_test, params.trainkit, isTest = True)
-          acc = validate(model, epoch, logFile, ek_test, collate_fn_test, params.trainkit, isTest = False)
+          for testk in list(set(["p22", "p08", "p01"]) - set([params.testkit])):
+            validate(model,epoch, logFile, ek_test, collate_fn_test, testk, isTest = True)
       elif params.dataset == 'DVS':
-        acc = validateDVS(model,epoch, logFile, DVSGesture, "vtn", params.num_steps, params.final_frames, params.skip_rate, ECL = True, dvs_imageSize = params.dvs_imageSize)
+        acc = validateDVS(model,epoch, logFile, DVSGesture, params.num_steps, params.final_frames, params.skip_rate, ECL = True, dvs_imageSize = params.dvs_imageSize)
       if acc > bestacc:
         bestacc = acc
         print("BEST!!!!")
@@ -315,21 +317,67 @@ def validate(model,epoch, logFile, ek_test, collate_fn_test, testKitchen, isTest
     if(pred_vid==labels[0]):
       count+=1
   
-  acc = count/len(test_dataset)
-  print(str(testKitchen), str1, "accuracy:", acc*100)
-  logFile.write(str(testKitchen) + str1 + " accuracy: " + str(acc*100) + "\n")
-  return acc*100
+  acc = count/len(test_dataset)*100
+  print(str(testKitchen), str1, "accuracy:", acc)
+  logFile.write(str(testKitchen) + str1 + " accuracy: " + str(acc) + "\n")
+  print(f'*****************************************************************************')
+  return acc
+
+def validateDVS(model,epoch, logFile, DVSGesture, num_steps, final_frames, skip_rate, ECL = False, dvs_imageSize = 128, val_cr = True, numClips = 5):
+    print(f'*************************Test Accuracy********************')
+    print(f'Checking Test Accuracy at epoch {epoch}')
+    model.eval()
+    bs = 1
+    num_steps_test = int(np.floor(num_steps / 5 * 18))
+    
+    test_set = DVSGesture("/home/tr248228/RP_EvT/October/videoMae/DVS/download", train=False,
+                            num_steps=num_steps_test, dt=int(500000/num_steps), final_frames = final_frames,
+                            skip_rate = skip_rate, numClips = numClips, isVal = True, dvs_imageSize = dvs_imageSize, val_cr = val_cr)
+    test_dataloader = DataLoader(test_set, batch_size=bs, shuffle=True, num_workers=4, drop_last = True)
+
+    count = 0
+    for i, data in enumerate(test_dataloader, 0):
+        clips, clip_label, pathBS = data
+        clipPred = []
+        for j in range(len(clips[0])):
+            video = clips[:,j]
+            video = video.permute(0,2,1,3,4)
+            input = Variable(video.cuda()) 
+            frameids = torch.arange(0, video.shape[2],1).to(torch.int).repeat(video.shape[0], 1).cuda()
+            pred = model([input, frameids])
+            if ECL: 
+                pred = pred[0]
+            pred = pred.squeeze()
+            sftmx = torch.nn.Softmax(dim=0)
+            pred_clip_1 = sftmx(pred)
+            clipPred.append(pred_clip_1[None, :])
+        clipPred = torch.cat(clipPred, dim=0)
+        idxs_mean = []
+        for k in range(len(pred_clip_1)):
+            idxs_mean.append(torch.mean(clipPred[:,k]))
+        pred_vid = idxs_mean.index(max(idxs_mean))
+        if(pred_vid==clip_label[0]):
+            count+=1
+    acc = count/len(test_set)*100
+
+    print("test accuracy: " + str(acc) + "\n")
+    print(f'**************************************************************')
+    logFile.write("test accuracy: " + str(acc) + "\n")
+
+    return acc
 
 
 if __name__ == "__main__":
-  # import argparse, importlib
-  # parser1 = argparse.ArgumentParser(description='Script to finetune VTN using ECL')
+  import argparse, importlib
+  parser = argparse.ArgumentParser(description='Script to finetune VTN w/ or w/o ECL')
 
-  # #parser1.add_argument("--run_id", dest='run_id', type=str, required=False, default= "dummy",help='run_id')
+  parser.add_argument('-c', '--config', type=str, help='Path to the config file')
 
-  # #parser1.add_argument("--params", dest='params_file_location', type=str, required=True, default= "config", help='params_file_location')
+  args = parser.parse_args()
 
-  # args = parser1.parse_args()
-  # #run_id = args.run_id
+  spec = importlib.util.spec_from_file_location('params', args.config)
+  params = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(params)
+
   main(params)
 
