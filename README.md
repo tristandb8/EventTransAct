@@ -17,13 +17,13 @@ Go to the snntorch/snntorch/spikevision/spikedata folder and replace dvs_gesture
 
 Finetuning on N-Epic-Kitchens dataset:
 ```
-python train_ECL_git.py -c configs/config_NEK.py
+python train.py -c configs/config_NEK.py
 ```
 Finetuning on DVS dataset:
 ```
-python train_ECL_git.py -c configs/config_DVS_woECL.py
+python train.py -c configs/config_DVS_woECL.py
 ```
 Finetuning on DVS dataset with contrastive loss:
 ```
-python train_ECL_git.py -c configs/config_DVS_wECL.py
+python train.py -c configs/config_DVS_wECL.py
 ```
